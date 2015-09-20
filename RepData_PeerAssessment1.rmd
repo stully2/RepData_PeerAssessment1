@@ -1,0 +1,221 @@
+---
+title: "RepData_PeerAssessment1"
+author: "stully2"
+date: "September 18, 2015"
+output: html_document
+---
+
+Since this analysis will utilize the plyr, xtable, and lattice packages in R we will first check installation and then load the appropriate libraries.
+
+``` {R InitWorkSpace, message = FALSE, warning = FALSE, results = "hide"}
+     pkgs <- c("plyr","xtable","lattice")
+     ck_install <- setdiff(pkgs,installed.packages())
+     
+     if (length(ck_install)!=0) {
+          install.packages(ck_install,repos="http://cran.rstudio.com/")
+     }
+     
+     lapply(pkgs, require, character.only = TRUE)
+
+```
+
+First, we will begin by importing our raw data from the provided dataset assuming it has been extracted to our main working directory. Please note that the interval representation varies from 0-55 with incriments of 5 and then resets to 0 while adding 100. this effectivly give us a numerical representation of a 24 hour clock scheme. For example interval 655 increases to 700 and interval 1335 represents 1:35pm.
+
+
+``` {R 01a_Data_Import}
+mydata <- read.csv("activity.csv", header = TRUE,na.strings = "NA")
+```
+
+We will proceed by making several initial transformations to our raw data set  
+
+- Convert date objects
+- Add Factor: Each date's day abbreviation
+- Add Factor: Day classification of weekend or weekday
+
+``` {R 01b_Data_Transform}
+     mydata <- within(mydata, 
+          {
+          date <- as.Date(date,"%Y-%m-%d")
+          day <- as.factor(weekdays(date,abbreviate = TRUE))
+          daytype <- as.factor(ifelse(weekdays(date,abbreviate = TRUE) %in%
+                                           c("Sat","Sun"),"weekend","weekday"))
+          }
+          )
+```
+
+Now we can start looking at our data set and exploring a few basic questions.  
+
+**Question 1:** 
+**What is mean total number of steps taken per day?**
+
+Here we will use the ddply function from the plyr library to sumarize and return a new data frame from which we can create step histogram by date.
+
+``` {R 01a_Data_DailyTotals} 
+     q1data <- ddply(mydata, .(date), summarize
+                 , var_sum = sum(steps,na.rm = TRUE))
+```
+
+``` {R 01b_Data_Hist, fig.width = 10, fig.height = 4} 
+     barplot(q1data$var_sum
+             , main = "Total Steps per Day"
+             , names.arg = q1data$date
+             , las = 2
+             , cex.names = 0.60
+             , cex.axis = 0.60
+             )
+```
+``` {R CloseDev1, results = "hide"} 
+     dev.off()
+```
+
+We may also want to take a look at the mean and median of our summary data.
+
+``` {R 01c_Data_Meanandmedian, results = "hide"} 
+     q1mean <- round(mean(q1data$var_sum),0)
+     q1median <- median(q1data$var_sum)
+```
+The resulting calculations are as follows:
+
+- Mean: `r q1mean`
+- Median: `r q1median`
+
+**Question 2:**
+**What is the average daily activity pattern?**
+
+First, we can summarize our data and extract the maximum value time interval.
+
+``` {R 02_Data_AvgDailyActivity} 
+     q2data <- ddply(mydata, .(interval), summarize
+                      , var_mean = round(mean(steps,na.rm = TRUE), 0))
+```
+ 
+``` {R 02_Max, results = "hide"}
+     q2maxint <- which.max(q2data$var_mean)
+     q2max <- q2data[q2maxint,1]
+```
+
+We can take a look at a plot of our data to get an idea of average daily active periods outside of our maximum period of `r q2max`   
+
+``` {R 02_Plot_Avg, fig.width = 10, fig.height = 4}
+     plot(q2data$interval,q2data$var_mean
+          ,type = "l"
+          ,xlab = "Interval"
+          ,ylab = "Average Steps"
+          ,cex = 0.65
+     ) 
+     legend("topright"
+            ,paste("Max Avg Time Interval:",q2max)
+            , cex=0.65
+            )
+```
+``` {R CloseDev2, results = "hide"} 
+     dev.off()
+```
+
+**Review Missing Values**
+
+First we should take a look at how many missing values we are working with and how they are allocated.
+
+``` {R 03a_MissingValues}
+     q3nacount <- sum(is.na(mydata$steps))
+```
+
+- Total missing: `r q3nacount`
+
+``` {R 03b_MissingValues, results = "asis"}
+     q3nabydate <- ddply(mydata, .(date), summarize
+                       , var_nacount = sum(is.na(steps)*1))
+     q3nabydate <- q3nabydate[q3nabydate$var_nacount!=0,]
+     q3nabydate$date <- as.character(q3nabydate$date)
+     
+     xt <- xtable(q3nabydate,digits=0,tabular.environment='longtable',floating=FALSE)
+     
+     print(xt, type = "html",include.rownames=FALSE)
+     
+```
+
+It looks like all missing values fall under full day periods so we can replace them with and average of the particular interval over all days with data. Assuming our subject maintains a regular weekly schdule we can apply the average of the particular day of the week (e.g. we replace missing Monday periods with the average Monday value for that time period)
+
+``` {R 03c_MissingValues}
+     mydata <- merge(mydata
+          , ddply(mydata, .(day,interval), summarize,
+                    mod_steps = round(mean(steps,na.rm = TRUE), 0))
+          , by = c("day","interval")
+          , sort = FALSE
+          )
+
+     mydata[!is.na(mydata$steps),"mod_steps"] <- mydata[!is.na(mydata$steps),"steps"]
+```
+
+####Visualize Updated Values
+
+Now that the missing values have been replaced let's take a look as how our analysis has changed.
+
+``` {R 04a_Data_DailyTotals} 
+     q4data <- ddply(mydata, .(date), summarize
+                 , var_sum = sum(mod_steps,na.rm = TRUE))
+```
+
+``` {R 04b_Data_Hist, fig.width = 10, fig.height = 4} 
+     barplot(q4data$var_sum
+             , main = "Total Steps per Day"
+             , names.arg = q1data$date
+             , las = 2
+             , cex.names = 0.60
+             , cex.axis = 0.60
+             )
+```
+``` {R  results = "hide"} 
+     dev.off()
+```
+
+``` {R 04c_Data_Meanandmedian, results = "hide"} 
+     q4mean <- round(mean(q4data$var_sum),0)
+     q4median <- median(q4data$var_sum)
+```
+The resulting calculations show now that our mean and median daily steps have increased by `r q4mean - q1mean` and `r q4median - q1median` respectivly.
+
+- Mean: `r format(q4mean, digits=9, decimal.mark=",",big.mark=",",small.mark=".", small.interval=3)`
+- Median: `r format(q4median, digits=9, decimal.mark=",",big.mark=",",small.mark=".", small.interval=3)`
+
+
+**Miscellanious**
+
+Lastly, we should take a quick look to see if there are any differences between weekday and weekend behavior. Again, We'll use the ddply function to summarize our data and then using the lattice plotting system, compare the results.
+
+``` {R 05a_Data_DailyTotals} 
+     q5data <- ddply(mydata, .(interval,daytype), summarize
+                      , var_mean = round(mean(steps,na.rm = TRUE), 0))
+```
+ 
+The Plot:
+ 
+``` {R , fig.width = 10, fig.height = 4}
+     xyplot(var_mean ~ interval | daytype
+            ,data = q5data
+            , layout= c(1,2)
+            , type = "l"
+            , ylab = "Number of Steps"
+            )
+```
+
+The resulting comparison reveals a few key observations that may require further invesitigation.
+
+**Weekdays**
+
+- Average activity begins earlier
+- This early activity also appears to increase rapidly
+- Activity spikes again after about another 3hrs 20 mins
+- Activity reduces for the majority of the remaining intervals
+- Activity minimizes around interval 2000
+
+**Weekends**
+
+- Compared to weekdays, activity increases more slowly
+- Early activity peaks around the same time but overall average is less
+- Remaining daily activity remain consistanly higher than weekdays
+- Activity looks to diminish slightly later in the day
+
+The results above may indicate that the individual maintains a consistant work schdule during weekdays consisting of waking at a particular time, traveling to location, and maintaining a consistant but lower activity level. This interpretation could be validated with further study.
+
+Further study may consist of comparing daily quarters such as early, midday, evening, and late along with a "modified" weekend (Fri_Evening - Sun_Midday). 
